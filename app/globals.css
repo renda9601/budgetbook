@@ -1,0 +1,440 @@
+:root {
+  --bg: #f7f8fb;
+  --panel: #ffffff;
+  --line: #d9dee8;
+  --text: #141820;
+  --muted: #667085;
+  --primary: #176b87;
+  --primary-dark: #0f4c5c;
+  --income: #15803d;
+  --expense: #c2410c;
+  --shadow: 0 10px 28px rgba(20, 24, 32, 0.08);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: Arial, "Noto Sans KR", sans-serif;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+.login-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: linear-gradient(135deg, #e8f3f5, #f7f8fb 45%, #fff7ed);
+}
+
+.login-panel {
+  width: min(920px, 100%);
+  display: grid;
+  grid-template-columns: 1.1fr 0.9fr;
+  gap: 32px;
+  align-items: center;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 40px;
+  box-shadow: var(--shadow);
+}
+
+.login-panel h1,
+.topbar h1 {
+  margin: 4px 0 0;
+  font-size: clamp(28px, 4vw, 44px);
+  letter-spacing: 0;
+}
+
+.login-copy {
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1.6;
+}
+
+.eyebrow {
+  margin: 0;
+  color: var(--primary);
+  font-weight: 700;
+}
+
+.login-form,
+.entry-form {
+  display: grid;
+  gap: 14px;
+}
+
+.login-form label,
+.field {
+  display: grid;
+  gap: 7px;
+  color: #344054;
+  font-weight: 700;
+}
+
+.login-form .remember-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+}
+
+.remember-check input {
+  width: auto;
+}
+
+input,
+select {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 11px 12px;
+  background: #fff;
+  color: var(--text);
+}
+
+.primary-button,
+.top-actions button,
+.form-actions button,
+.row-actions button,
+.nav-button {
+  border: 0;
+  border-radius: 6px;
+}
+
+.primary-button {
+  background: var(--primary);
+  color: white;
+  padding: 12px 16px;
+  font-weight: 700;
+}
+
+.hint,
+.error {
+  margin: 0;
+  font-size: 14px;
+}
+
+.hint {
+  color: var(--muted);
+}
+
+.error,
+.expense-text {
+  color: var(--expense);
+}
+
+.income-text {
+  color: var(--income);
+}
+
+.app-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 248px 1fr;
+}
+
+.sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  padding: 20px 14px;
+  background: #16202a;
+  color: white;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px 22px;
+}
+
+.nav-button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 10px;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+}
+
+.nav-button.active,
+.nav-button:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.content {
+  padding: 24px;
+  padding-bottom: 92px;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 22px;
+}
+
+.top-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.icon-button {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  color: white;
+  background: var(--primary);
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.metric,
+.panel,
+.filter-bar {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+
+.metric {
+  min-height: 104px;
+  padding: 16px;
+  display: grid;
+  align-content: space-between;
+}
+
+.metric span,
+.metric small {
+  color: var(--muted);
+}
+
+.metric strong {
+  font-size: clamp(20px, 2vw, 27px);
+  letter-spacing: 0;
+}
+
+.metric.income strong {
+  color: var(--income);
+}
+
+.metric.expense strong {
+  color: var(--expense);
+}
+
+.chart-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(320px, 1fr));
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.panel {
+  padding: 18px;
+  margin-top: 16px;
+}
+
+.panel h2 {
+  margin: 0 0 14px;
+  font-size: 20px;
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 900px;
+}
+
+th,
+td {
+  padding: 12px 10px;
+  border-bottom: 1px solid #edf0f5;
+  text-align: left;
+  white-space: nowrap;
+}
+
+th {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.row-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.row-actions button {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  background: #eef2f6;
+}
+
+.filter-bar {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(120px, 1fr));
+  gap: 10px;
+  padding: 14px;
+}
+
+.entry-form {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+}
+
+.check input {
+  width: auto;
+}
+
+.form-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 8px;
+}
+
+.form-actions button:not(.primary-button) {
+  padding: 12px 16px;
+  background: #eef2f6;
+}
+
+.fixed-grid,
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.list-row,
+.list-box p {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid #edf0f5;
+}
+
+.list-row small {
+  grid-column: 1 / -1;
+  color: var(--muted);
+}
+
+.list-box h3 {
+  margin: 0 0 8px;
+}
+
+.bottom-tabs {
+  display: none;
+}
+
+@media (max-width: 1180px) {
+  .summary-grid {
+    grid-template-columns: repeat(2, minmax(150px, 1fr));
+  }
+
+  .chart-grid,
+  .filter-bar,
+  .entry-form {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 760px) {
+  .login-panel {
+    grid-template-columns: 1fr;
+    padding: 24px;
+  }
+
+  .app-shell {
+    display: block;
+  }
+
+  .sidebar {
+    display: none;
+  }
+
+  .content {
+    padding: 16px;
+    padding-bottom: 92px;
+  }
+
+  .topbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .top-actions {
+    width: 100%;
+  }
+
+  .top-actions input {
+    flex: 1;
+  }
+
+  .summary-grid,
+  .chart-grid,
+  .filter-bar,
+  .entry-form,
+  .fixed-grid,
+  .settings-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .bottom-tabs {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 20;
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 2px;
+    padding: 8px;
+    background: #16202a;
+    color: white;
+  }
+
+  .bottom-tabs .nav-button {
+    justify-content: center;
+    display: grid;
+    gap: 4px;
+    font-size: 12px;
+    padding: 8px 4px;
+  }
+}
