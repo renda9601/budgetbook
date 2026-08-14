@@ -25,7 +25,6 @@ import {
   filterTransactions,
   formatMonth,
   money,
-  paymentLabel,
   paymentMethodLabel,
   summarizeMonth,
   trendSummary,
@@ -33,19 +32,24 @@ import {
 } from "@/lib/calculations";
 import { deleteTransaction, fetchHouseholdData, insertTransaction, loadLocalData, saveLocalData, updateTransaction } from "@/lib/dataStore";
 import { exportMonthWorkbook } from "@/lib/excelExport";
+import {
+  assetTypeLabel,
+  buildTransactionPayload,
+  findTransactionOwner,
+  formValuesFromTransaction,
+  transactionAssetLabel
+} from "@/lib/transactionModel";
 
 const EMPTY_FORM = {
-  transaction_date: "2026-06-30",
+  transaction_date: "",
   type: "expense",
   amount: "",
-  payment_method: "card",
-  card_id: "card-shinhan",
-  account_id: "",
-  category_id: "cat-expense-1",
+  from_asset_id: "",
+  to_asset_id: "",
+  category_id: "",
   merchant: "",
   memo: "",
-  owner_user_id: "dad",
-  created_by: "dad",
+  owner_member_id: "",
   is_fixed: false,
   is_installment: false
 };
@@ -56,9 +60,12 @@ export default function Page() {
   const [sessionUser, setSessionUser] = useState(null);
   const [loginId, setLoginId] = useState("dad");
   const [password, setPassword] = useState("");
-  const [rememberPassword, setRememberPassword] = useState(false);
+  const [rememberLoginId, setRememberLoginId] = useState(false);
   const [loginError, setLoginError] = useState("");
-  const [month, setMonth] = useState("2026-06");
+  const [actionError, setActionError] = useState("");
+  const [actionMessage, setActionMessage] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [month, setMonth] = useState(formatMonth());
   const [view, setView] = useState("dashboard");
   const [data, setData] = useState(loadLocalData);
   const [filters, setFilters] = useState({ type: "all", payment_method: "all", card_id: "all", account_id: "all", category_id: "all", owner_user_id: "all", sort: "desc" });
@@ -69,15 +76,20 @@ export default function Page() {
     const remembered = loadRememberedLogin();
     if (remembered) {
       setLoginId(remembered.loginId);
-      setPassword(remembered.password);
-      setRememberPassword(true);
+      setRememberLoginId(true);
     }
 
     if (!hasSupabaseConfig) return;
-    supabase.auth.getUser().then(({ data: authData }) => {
-      if (authData.user) {
-        setSessionUser({ login_id: authData.user.email?.split("@")[0], display_name: authData.user.email?.startsWith("mom") ? "유미" : "재용" });
-        refreshData();
+    supabase.auth.getUser().then(async ({ data: authData, error }) => {
+      if (error || !authData.user) return;
+      const restoredLoginId = authData.user.email?.split("@")[0]?.toLowerCase();
+      if (!MEMBERS[restoredLoginId]) return;
+      try {
+        const householdData = await fetchHouseholdData(restoredLoginId);
+        setData(householdData);
+        setSessionUser({ ...MEMBERS[restoredLoginId], user_id: authData.user.id });
+      } catch (refreshError) {
+        setLoginError(toUserMessage(refreshError, "가족 데이터를 불러오지 못했습니다."));
       }
     });
   }, []);
@@ -91,9 +103,10 @@ export default function Page() {
     setForm(createDefaultForm(data, sessionUser, month));
   }, [data, sessionUser, month, editingId]);
 
-  async function refreshData() {
-    const householdData = await fetchHouseholdData();
+  async function refreshData(targetLoginId = sessionUser?.login_id) {
+    const householdData = await fetchHouseholdData(targetLoginId);
     setData(householdData);
+    return householdData;
   }
 
   async function handleLogin(event) {
@@ -106,7 +119,7 @@ export default function Page() {
     }
 
     if (!hasSupabaseConfig) {
-      saveRememberedLogin(normalized, password, rememberPassword);
+      saveRememberedLogin(normalized, rememberLoginId);
       setSessionUser(MEMBERS[normalized]);
       return;
     }
@@ -119,14 +132,20 @@ export default function Page() {
       setLoginError(error.message);
       return;
     }
-    saveRememberedLogin(normalized, password, rememberPassword);
-    setSessionUser(MEMBERS[normalized]);
-    await refreshData();
+    try {
+      const householdData = await refreshData(normalized);
+      saveRememberedLogin(normalized, rememberLoginId);
+      setSessionUser({ ...MEMBERS[normalized], user_id: householdData.authUserId });
+    } catch (refreshError) {
+      await supabase.auth.signOut();
+      setLoginError(toUserMessage(refreshError, "로그인은 성공했지만 가족 데이터를 불러오지 못했습니다."));
+    }
   }
 
   async function handleLogout() {
     if (hasSupabaseConfig) await supabase.auth.signOut();
     setSessionUser(null);
+    setPassword("");
   }
 
   const summary = useMemo(() => summarizeMonth(data.transactions, month), [data.transactions, month]);
@@ -140,43 +159,59 @@ export default function Page() {
 
   async function submitTransaction(event) {
     event.preventDefault();
-    const normalized = {
-      ...form,
-      amount: Number(form.amount),
-      card_id: form.payment_method === "card" ? form.card_id : null,
-      account_id: form.payment_method !== "card" ? form.account_id || accountForMethod(form.payment_method, data.accounts) : null,
-      created_by: sessionUser.login_id,
-      owner_user_id: form.owner_user_id
-    };
+    setActionError("");
+    setActionMessage("");
+    setIsSaving(true);
+    try {
+      const existing = data.transactions.find((transaction) => transaction.id === editingId);
+      const normalized = buildTransactionPayload(form, {
+        assets: data.assets,
+        members: data.members,
+        authUserId: data.authUserId,
+        loginId: sessionUser.login_id,
+        existing
+      });
 
-    if (editingId) {
-      const updated = await updateTransaction(editingId, normalized);
-      setData((current) => ({
-        ...current,
-        transactions: current.transactions.map((transaction) => (transaction.id === editingId ? updated : transaction))
-      }));
-    } else {
-      const inserted = await insertTransaction(data.householdId, normalized);
-      setData((current) => ({ ...current, transactions: [inserted, ...current.transactions] }));
+      if (editingId) {
+        const updated = await updateTransaction(editingId, data.householdId, normalized);
+        setData((current) => ({
+          ...current,
+          transactions: current.transactions.map((transaction) => (transaction.id === editingId ? updated : transaction))
+        }));
+        setActionMessage("거래를 수정했습니다.");
+      } else {
+        const inserted = await insertTransaction(data.householdId, normalized);
+        setData((current) => ({ ...current, transactions: [inserted, ...current.transactions] }));
+        setActionMessage("거래를 등록했습니다.");
+      }
+      setEditingId(null);
+      setForm(createDefaultForm(data, sessionUser, month));
+    } catch (error) {
+      setActionError(toUserMessage(error, "거래를 저장하지 못했습니다."));
+    } finally {
+      setIsSaving(false);
     }
-    setEditingId(null);
-    setForm(createDefaultForm(data, sessionUser, month));
   }
 
   async function removeTransaction(id) {
-    await deleteTransaction(id);
-    setData((current) => ({ ...current, transactions: current.transactions.filter((transaction) => transaction.id !== id) }));
+    if (!window.confirm("이 거래를 삭제할까요? 삭제 후에는 화면에서 복구할 수 없습니다.")) return;
+    setActionError("");
+    setActionMessage("");
+    try {
+      await deleteTransaction(id, data.householdId);
+      setData((current) => ({ ...current, transactions: current.transactions.filter((transaction) => transaction.id !== id) }));
+      setActionMessage("거래를 삭제했습니다.");
+    } catch (error) {
+      setActionError(toUserMessage(error, "거래를 삭제하지 못했습니다."));
+    }
   }
 
   function startEdit(transaction) {
     setEditingId(transaction.id);
-    setForm({ ...EMPTY_FORM, ...transaction, amount: String(transaction.amount), account_id: transaction.account_id || "", card_id: transaction.card_id || "card-shinhan" });
+    setActionError("");
+    setActionMessage("");
+    setForm(formValuesFromTransaction(transaction, data.assets, data.members));
     setView("entry");
-  }
-
-  function accountForMethod(method, accounts) {
-    const type = method === "local_currency" ? "local_currency" : method === "cash" ? "cash" : "bank";
-    return accounts.find((account) => account.type === type)?.id || null;
   }
 
   if (!sessionUser) {
@@ -198,8 +233,8 @@ export default function Page() {
               <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder={hasSupabaseConfig ? "Supabase 비밀번호" : "데모 모드"} autoComplete="current-password" />
             </label>
             <label className="remember-check">
-              <input type="checkbox" checked={rememberPassword} onChange={(event) => setRememberPassword(event.target.checked)} />
-              비밀번호 자동저장
+              <input type="checkbox" checked={rememberLoginId} onChange={(event) => setRememberLoginId(event.target.checked)} />
+              아이디 기억
             </label>
             {loginError ? <p className="error">{loginError}</p> : null}
             {!hasSupabaseConfig ? <p className="hint">Supabase 환경변수가 없어 샘플 데이터 데모 모드로 실행됩니다.</p> : null}
@@ -236,6 +271,9 @@ export default function Page() {
             <button className="icon-button" title="로그아웃" onClick={handleLogout}><LogOut size={18} /></button>
           </div>
         </header>
+
+        {actionError ? <p className="status-message error" role="alert">{actionError}</p> : null}
+        {actionMessage ? <p className="status-message success" role="status">{actionMessage}</p> : null}
 
         {view === "dashboard" && (
           <>
@@ -313,9 +351,7 @@ export default function Page() {
           </>
         )}
 
-        {view === "entry" && (
-          <TransactionForm form={form} setForm={setForm} data={data} onSubmit={submitTransaction} editingId={editingId} onCancel={() => { setEditingId(null); setForm(EMPTY_FORM); }} />
-        )}
+        {view === "entry" && <TransactionForm form={form} setForm={setForm} data={data} sessionUser={sessionUser} onSubmit={submitTransaction} editingId={editingId} isSaving={isSaving} onCancel={() => { setEditingId(null); setForm(createDefaultForm(data, sessionUser, month)); setActionError(""); }} />}
 
         {view === "fixed" && <FixedInstallmentPanel data={data} />}
 
@@ -362,7 +398,7 @@ function FilterBar({ filters, setFilters, data }) {
       <Select value={filters.card_id} onChange={(value) => setFilters((current) => ({ ...current, card_id: value }))} options={[["all", "전체 카드"], ...data.cards.map((item) => [item.id, item.name])]} />
       <Select value={filters.account_id} onChange={(value) => setFilters((current) => ({ ...current, account_id: value }))} options={[["all", "전체 계좌"], ...data.accounts.map((item) => [item.id, item.name])]} />
       <Select value={filters.category_id} onChange={(value) => setFilters((current) => ({ ...current, category_id: value }))} options={[["all", "전체 카테고리"], ...data.categories.map((item) => [item.id, item.name])]} />
-      <Select value={filters.owner_user_id} onChange={(value) => setFilters((current) => ({ ...current, owner_user_id: value }))} options={[["all", "전체 입력자"], ["dad", "재용"], ["mom", "유미"]]} />
+      <Select value={filters.owner_user_id} onChange={(value) => setFilters((current) => ({ ...current, owner_user_id: value }))} options={[["all", "전체 사용자"], ...data.members.map((member) => [member.login_id, member.display_name])]} />
       <Select value={filters.sort} onChange={(value) => setFilters((current) => ({ ...current, sort: value }))} options={[["desc", "최신순"], ["asc", "오래된순"]]} />
     </section>
   );
@@ -382,15 +418,16 @@ function TransactionTable({ transactions, data, onEdit, onDelete }) {
             <tr><th>거래일</th><th>유형</th><th>결제수단</th><th>카테고리</th><th>사용처</th><th>금액</th><th>입력자</th><th>메모</th><th></th></tr>
           </thead>
           <tbody>
+            {!transactions.length ? <tr><td colSpan="9" className="empty-row">선택한 조건에 맞는 거래가 없습니다.</td></tr> : null}
             {transactions.map((transaction) => (
               <tr key={transaction.id}>
                 <td>{transaction.transaction_date}</td>
                 <td>{typeLabel(transaction.type)}</td>
-                <td>{paymentLabel(transaction, data.cards, data.accounts)}</td>
+                <td>{transactionAssetLabel(transaction, data.assets, data.cards, data.accounts)}</td>
                 <td>{data.categories.find((category) => category.id === transaction.category_id)?.name || ""}</td>
                 <td>{transaction.merchant}</td>
                 <td className={transaction.type === "income" ? "income-text" : "expense-text"}>{money(transaction.amount)}</td>
-                <td>{transaction.owner_user_id === "mom" ? "유미" : "재용"}</td>
+                <td>{findTransactionOwner(transaction, data.members)?.display_name || transaction.owner_user_id || ""}</td>
                 <td>{transaction.memo}</td>
                 <td className="row-actions">
                   <button title="수정" onClick={() => onEdit(transaction)}><Pencil size={16} /></button>
@@ -405,27 +442,45 @@ function TransactionTable({ transactions, data, onEdit, onDelete }) {
   );
 }
 
-function TransactionForm({ form, setForm, data, onSubmit, editingId, onCancel }) {
-  const expenseCategories = data.categories.filter((category) => category.type === form.type || (form.type === "transfer" && category.type === "expense"));
+function TransactionForm({ form, setForm, data, sessionUser, onSubmit, editingId, isSaving, onCancel }) {
+  const categories = data.categories.filter((category) => category.type === form.type && category.is_active !== false);
+  const assetOptions = data.assets.filter((asset) => asset.is_active !== false).map((asset) => [asset.id, `${asset.name} · ${assetTypeLabel(asset.type)}`]);
+
+  function changeType(type) {
+    const firstCategory = data.categories.find((category) => category.type === type && category.is_active !== false)?.id || "";
+    const firstAssetId = data.assets.find((asset) => asset.is_active !== false)?.id || "";
+    setForm((current) => ({
+      ...current,
+      type,
+      category_id: type === "transfer" ? "" : firstCategory,
+      from_asset_id: type === "income" ? "" : current.from_asset_id || firstAssetId,
+      to_asset_id: type === "expense"
+        ? ""
+        : current.to_asset_id && current.to_asset_id !== current.from_asset_id
+          ? current.to_asset_id
+          : data.assets.find((asset) => asset.is_active !== false && asset.id !== (current.from_asset_id || firstAssetId))?.id || firstAssetId
+    }));
+  }
+
   return (
     <section className="panel">
       <h2>{editingId ? "거래 수정" : "거래 등록"}</h2>
       <form className="entry-form" onSubmit={onSubmit}>
         <Field label="거래일"><input type="date" value={form.transaction_date} onChange={(event) => setFormValue(setForm, "transaction_date", event.target.value)} required /></Field>
-        <Field label="거래 유형"><Select value={form.type} onChange={(value) => setFormValue(setForm, "type", value)} options={[["income", "수입"], ["expense", "지출"], ["transfer", "이체"]]} /></Field>
-        <Field label="금액"><input type="number" min="0" value={form.amount} onChange={(event) => setFormValue(setForm, "amount", event.target.value)} required /></Field>
-        <Field label="결제수단"><Select value={form.payment_method} onChange={(value) => setFormValue(setForm, "payment_method", value)} options={[["cash", "현금"], ["card", "신용카드"], ["local_currency", "지역화폐"], ["bank", "은행"]]} /></Field>
-        {form.payment_method === "card" ? <Field label="카드사"><Select value={form.card_id} onChange={(value) => setFormValue(setForm, "card_id", value)} options={data.cards.map((item) => [item.id, item.name])} /></Field> : null}
-        {form.payment_method !== "card" ? <Field label="계좌"><Select value={form.account_id || data.accounts[0]?.id || ""} onChange={(value) => setFormValue(setForm, "account_id", value)} options={data.accounts.map((item) => [item.id, item.name])} /></Field> : null}
-        <Field label="카테고리"><Select value={form.category_id} onChange={(value) => setFormValue(setForm, "category_id", value)} options={expenseCategories.map((item) => [item.id, item.name])} /></Field>
+        <Field label="거래 유형"><Select value={form.type} onChange={changeType} options={[["income", "수입"], ["expense", "지출"], ["transfer", "이체"]]} /></Field>
+        <Field label="금액"><input type="number" min="1" step="1" value={form.amount} onChange={(event) => setFormValue(setForm, "amount", event.target.value)} required /></Field>
+        {form.type !== "income" ? <Field label={form.type === "transfer" ? "출금 자산" : "결제수단/자산"}><Select value={form.from_asset_id} onChange={(value) => setFormValue(setForm, "from_asset_id", value)} options={assetOptions} /></Field> : null}
+        {form.type !== "expense" ? <Field label={form.type === "transfer" ? "입금 자산" : "입금 자산"}><Select value={form.to_asset_id} onChange={(value) => setFormValue(setForm, "to_asset_id", value)} options={assetOptions} /></Field> : null}
+        {form.type !== "transfer" ? <Field label="카테고리"><Select value={form.category_id} onChange={(value) => setFormValue(setForm, "category_id", value)} options={categories.map((item) => [item.id, item.name])} /></Field> : null}
         <Field label="사용처"><input value={form.merchant} onChange={(event) => setFormValue(setForm, "merchant", event.target.value)} required /></Field>
-        <Field label="입력자"><Select value={form.owner_user_id} onChange={(value) => setFormValue(setForm, "owner_user_id", value)} options={[["dad", "재용"], ["mom", "유미"]]} /></Field>
+        <Field label="사용자"><Select value={form.owner_member_id} onChange={(value) => setFormValue(setForm, "owner_member_id", value)} options={data.members.map((member) => [member.id, member.display_name])} /></Field>
         <Field label="메모"><input value={form.memo} onChange={(event) => setFormValue(setForm, "memo", event.target.value)} /></Field>
+        <p className="form-note">입력한 사람: {sessionUser.display_name} · 데이터 출처: 직접 입력</p>
         <label className="check"><input type="checkbox" checked={form.is_fixed} onChange={(event) => setFormValue(setForm, "is_fixed", event.target.checked)} />고정비</label>
         <label className="check"><input type="checkbox" checked={form.is_installment} onChange={(event) => setFormValue(setForm, "is_installment", event.target.checked)} />할부</label>
         <div className="form-actions">
-          <button className="primary-button" type="submit">{editingId ? "수정 저장" : "등록"}</button>
-          {editingId ? <button type="button" onClick={onCancel}>취소</button> : null}
+          <button className="primary-button" type="submit" disabled={isSaving}>{isSaving ? "저장 중..." : editingId ? "수정 저장" : "등록"}</button>
+          {editingId ? <button type="button" onClick={onCancel} disabled={isSaving}>취소</button> : null}
         </div>
       </form>
     </section>
@@ -441,15 +496,16 @@ function setFormValue(setForm, key, value) {
 }
 
 function createDefaultForm(data, sessionUser, month) {
-  const userId = sessionUser?.login_id || "dad";
+  const currentMember = data.members.find((member) => member.login_id === sessionUser?.login_id) || data.members[0];
+  const firstAssetId = data.assets.find((asset) => asset.is_active !== false)?.id || "";
+  const today = formatMonth() === month ? new Date().toLocaleDateString("en-CA") : `${month}-01`;
   return {
     ...EMPTY_FORM,
-    transaction_date: `${month}-01`,
-    card_id: data.cards[0]?.id || "",
-    account_id: data.accounts.find((account) => account.type === "bank")?.id || data.accounts[0]?.id || "",
+    transaction_date: today,
+    from_asset_id: firstAssetId,
+    to_asset_id: firstAssetId,
     category_id: data.categories.find((category) => category.type === "expense")?.id || "",
-    owner_user_id: userId,
-    created_by: userId
+    owner_member_id: currentMember?.id || ""
   };
 }
 
@@ -480,17 +536,28 @@ function loadRememberedLogin() {
   if (typeof window === "undefined") return null;
   try {
     const saved = window.localStorage.getItem(REMEMBER_LOGIN_KEY);
-    return saved ? JSON.parse(saved) : null;
+    if (!saved) return null;
+    const parsed = JSON.parse(saved);
+    window.localStorage.setItem(REMEMBER_LOGIN_KEY, JSON.stringify({ loginId: parsed.loginId }));
+    return parsed.loginId ? { loginId: parsed.loginId } : null;
   } catch {
     return null;
   }
 }
 
-function saveRememberedLogin(loginId, password, shouldRemember) {
+function saveRememberedLogin(loginId, shouldRemember) {
   if (typeof window === "undefined") return;
   if (!shouldRemember) {
     window.localStorage.removeItem(REMEMBER_LOGIN_KEY);
     return;
   }
-  window.localStorage.setItem(REMEMBER_LOGIN_KEY, JSON.stringify({ loginId, password }));
+  window.localStorage.setItem(REMEMBER_LOGIN_KEY, JSON.stringify({ loginId }));
+}
+
+function toUserMessage(error, fallback) {
+  const message = error?.message || "";
+  if (!message) return fallback;
+  if (message.includes("row-level security")) return "이 가족 데이터에 접근할 권한이 없습니다.";
+  if (message.includes("duplicate key")) return "이미 등록된 데이터와 충돌했습니다.";
+  return message;
 }

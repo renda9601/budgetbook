@@ -138,6 +138,18 @@ select {
   color: var(--expense);
 }
 
+.success {
+  color: var(--income);
+}
+
+.status-message {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border-radius: 6px;
+  background: #f8fafc;
+  font-weight: 700;
+}
+
 .income-text {
   color: var(--income);
 }
@@ -310,6 +322,19 @@ th {
 
 .entry-form {
   grid-template-columns: repeat(3, 1fr);
+}
+
+.form-note {
+  margin: 0;
+  align-self: end;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.empty-row {
+  padding: 32px 12px;
+  text-align: center;
+  color: var(--muted);
 }
 
 .check {
